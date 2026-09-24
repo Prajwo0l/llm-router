@@ -12,6 +12,12 @@ the project brief asks for as two separate runs against the same server:
 
 Run headless with e.g. `-u 50 -r 5 -t 3m --headless --csv=loadtest/results/run1`
 to get CSV output Locust can also plot from.
+
+Each simulated user gets its own fake API key (see RouterUser.on_start) so
+-u N actually represents N separate clients, each with their own rate-limit
+bucket -- without this, every user shares the "anonymous" bucket and the
+test mostly measures the rate limiter rejecting a single hammering client,
+not realistic multi-tenant load.
 """
 from __future__ import annotations
 
@@ -37,6 +43,17 @@ _CACHEABLE_PROMPTS = [
 
 class RouterUser(HttpUser):
     wait_time = between(0.5, 2.0)
+
+    def on_start(self):
+        # Each simulated user gets its own fake API key, so Locust's -u
+        # users actually exercise the rate limiter's per-key isolation
+        # instead of all sharing the single "anonymous" bucket (see
+        # app/main.py's _resolve_api_key -- no Authorization header means
+        # every request falls back to the same shared key). Without this,
+        # a run with -u 20 measures one client hammering the server 20x
+        # concurrently and hitting default_rate_limit_per_minute almost
+        # immediately, not 20 separate clients under normal load.
+        self.client.headers["Authorization"] = f"Bearer loadtest-user-{uuid.uuid4().hex[:12]}"
 
     @tag("nocache")
     @task(3)
