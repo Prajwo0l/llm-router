@@ -1,0 +1,12 @@
+# Benchmark harness extra. Not needed to run the API server itself.
+#
+# numpy/scikit-learn use minimum-version bounds, not exact pins -- both
+# compile C/C++ code, and an exact old version can lack a pre-built
+# package for whatever Python version you actually have installed,
+# forcing pip to build from source (which can fail against a newer
+# compiler than the package's release predates). Letting pip pick the
+# newest compatible release avoids that.
+datasets>=3.0
+scikit-learn>=1.5
+numpy>=2.1
+httpx==0.27.2

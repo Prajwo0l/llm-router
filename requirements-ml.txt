@@ -1,0 +1,6 @@
+# Difficulty classifier inference extra. Training itself happens in Colab
+# (see training/README.md) -- install this locally only if you've copied a
+# trained checkpoint back and want app/router/classifier.py to use it
+# instead of the heuristic fallback.
+torch==2.4.1
+transformers==4.45.1

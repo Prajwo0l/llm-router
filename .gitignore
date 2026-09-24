@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Runtime data
+data/
+*.sqlite3
+
+# Trained classifier checkpoints -- these are large binary files produced
+# by the Colab notebook (training/) and copied back in manually; they
+# don't belong in git.
+training/checkpoints/
+training/data/
+
+# Benchmark/load test outputs
+benchmark/data/
+benchmark/results/
+loadtest/results/
+
+.DS_Store
+*.egg-info/

@@ -1,0 +1,5 @@
+# Opt-in: only needed if you set EMBEDDING_BACKEND=sentence-transformers
+# in .env instead of the default "openai". Pulls in torch -- a real local
+# ML install, not something installed unless you explicitly choose this
+# path (e.g. to avoid embedding-API cost/network calls entirely).
+sentence-transformers==3.1.1

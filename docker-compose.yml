@@ -1,0 +1,34 @@
+services:
+  router:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # Cost ledger (SQLite) persists across restarts.
+      - ./data:/app/data
+      # If you've copied a trained checkpoint into
+      # training/checkpoints/difficulty-classifier locally (see
+      # training/README.md), it's picked up here without a rebuild.
+      - ./training/checkpoints:/app/training/checkpoints
+    restart: unless-stopped
+
+  # Optional, and NOT started by a plain `docker compose up` -- the LOCAL
+  # tier isn't in the default routing ladder, so most setups (including
+  # testing against a single OpenAI key) don't need this container at all.
+  # Start it explicitly with `docker compose --profile local up` once
+  # you've set OLLAMA_BASE_URL=http://ollama:11434 in .env and pulled a
+  # model in: `docker compose --profile local exec ollama ollama pull llama3.1:8b`
+  # (matching app/router/tiers.py's MODEL_REGISTRY[Tier.LOCAL].model).
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

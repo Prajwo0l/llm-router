@@ -1,0 +1,18 @@
+# Semantic cache extra -- app/cache/semantic_cache.py imports these lazily,
+# so the server runs fine without this installed (semantic_cache_enabled
+# just has no effect: get_cache() returns None).
+#
+# Only faiss + numpy by default -- sufficient for EMBEDDING_BACKEND=openai
+# (the default in .env.example), which calls OpenAI's embeddings API, not
+# a local model. sentence-transformers pulls in torch as a dependency --
+# a genuinely heavy install with no purpose here unless you deliberately
+# switch EMBEDDING_BACKEND to "sentence-transformers" (see
+# requirements-cache-local-embeddings.txt), which is a local-inference
+# choice, not something this project turns on for you by default.
+#
+# Minimum-version bounds, not exact pins -- both compile C/C++ code, and
+# an old exact version can lack a pre-built package for whatever Python
+# version is actually installed, forcing a from-source build that can fail
+# against a newer compiler (see requirements-benchmark.txt's note).
+faiss-cpu>=1.9
+numpy>=2.1

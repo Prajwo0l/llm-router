@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>llm-router dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --panel: #12151c;
+      --border: #232733;
+      --text: #e6e8ee;
+      --muted: #8a90a2;
+      --accent: #6ea8fe;
+      --good: #4ade80;
+      --warn: #fbbf24;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+    .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 20px; }
+    .controls label { font-size: 13px; color: var(--muted); }
+    select, button {
+      background: var(--panel); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 10px; font-size: 13px;
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+    @media (max-width: 800px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .card .value { font-size: 24px; font-weight: 600; margin-top: 6px; }
+    .charts { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 20px; }
+    @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .panel h2 { font-size: 13px; color: var(--muted); margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+    .badge.cache { background: rgba(74, 222, 128, 0.15); color: var(--good); }
+    .badge.tier-cheap { background: rgba(74, 222, 128, 0.15); color: var(--good); }
+    .badge.tier-mid { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+    .badge.tier-strong { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+    .badge.tier-local { background: rgba(110, 168, 254, 0.15); color: var(--accent); }
+    .empty { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>llm-router dashboard</h1>
+  <div class="subtitle" id="subtitle">Loading&hellip;</div>
+
+  <div class="controls">
+    <label for="window-select">Window</label>
+    <select id="window-select">
+      <option value="1">Last 1 hour</option>
+      <option value="6">Last 6 hours</option>
+      <option value="24" selected>Last 24 hours</option>
+      <option value="168">Last 7 days</option>
+    </select>
+    <button id="refresh-btn">Refresh</button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">Total requests</div>
+      <div class="value" id="stat-requests">&ndash;</div>
+    </div>
+    <div class="card">
+      <div class="label">Total cost (USD)</div>
+      <div class="value" id="stat-cost">&ndash;</div>
+    </div>
+    <div class="card">
+      <div class="label">Cache hit rate</div>
+      <div class="value" id="stat-cache">&ndash;</div>
+    </div>
+    <div class="card">
+      <div class="label">Avg cost / request</div>
+      <div class="value" id="stat-avg-cost">&ndash;</div>
+    </div>
+  </div>
+
+  <div class="charts">
+    <div class="panel">
+      <h2>Cost over time</h2>
+      <canvas id="cost-chart" height="110"></canvas>
+    </div>
+    <div class="panel">
+      <h2>Requests by tier</h2>
+      <canvas id="tier-chart" height="110"></canvas>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Recent requests</h2>
+    <table id="recent-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Tier</th>
+          <th>Provider / model</th>
+          <th>Cache</th>
+          <th>Cost</th>
+          <th>Latency</th>
+        </tr>
+      </thead>
+      <tbody id="recent-tbody"></tbody>
+    </table>
+    <div class="empty" id="recent-empty" style="display:none;">No requests recorded yet.</div>
+  </div>
+
+  <script>
+    let costChart = null;
+    let tierChart = null;
+
+    function fmtUsd(v) {
+      return "$" + Number(v).toFixed(4);
+    }
+
+    function fmtTime(ts) {
+      return new Date(ts * 1000).toLocaleString();
+    }
+
+    function tierBadgeClass(tier) {
+      return "badge tier-" + (tier || "unknown").toLowerCase();
+    }
+
+    async function loadDashboard() {
+      const windowHours = document.getElementById("window-select").value;
+      const bucketMinutes = windowHours <= 6 ? 5 : windowHours <= 24 ? 60 : 360;
+
+      let data;
+      try {
+        const res = await fetch(`/dashboard/api/summary?window_hours=${windowHours}&bucket_minutes=${bucketMinutes}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        data = await res.json();
+      } catch (err) {
+        document.getElementById("subtitle").textContent = `Failed to load: ${err.message}. Is the API server running?`;
+        return;
+      }
+
+      document.getElementById("subtitle").textContent =
+        `Generated at ${fmtTime(data.generated_at)} — window: last ${data.window_hours}h`;
+
+      const s = data.summary;
+      document.getElementById("stat-requests").textContent = s.total_requests.toLocaleString();
+      document.getElementById("stat-cost").textContent = fmtUsd(s.total_cost_usd);
+      document.getElementById("stat-cache").textContent = (s.cache_hit_rate * 100).toFixed(1) + "%";
+      document.getElementById("stat-avg-cost").textContent =
+        s.total_requests ? fmtUsd(s.total_cost_usd / s.total_requests) : "$0.0000";
+
+      renderCostChart(data.timeseries);
+      renderTierChart(s.by_tier);
+      renderRecentTable(data.recent_events);
+    }
+
+    function renderCostChart(timeseries) {
+      const ctx = document.getElementById("cost-chart");
+      const labels = timeseries.map((r) => fmtTime(r.bucket_start_ts));
+      const costs = timeseries.map((r) => r.cost_usd);
+      const requests = timeseries.map((r) => r.requests);
+
+      if (costChart) costChart.destroy();
+      costChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Cost (USD)",
+              data: costs,
+              borderColor: "#6ea8fe",
+              backgroundColor: "rgba(110, 168, 254, 0.15)",
+              tension: 0.25,
+              fill: true,
+              yAxisID: "y",
+            },
+            {
+              label: "Requests",
+              data: requests,
+              borderColor: "#4ade80",
+              tension: 0.25,
+              fill: false,
+              yAxisID: "y1",
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          interaction: { mode: "index", intersect: false },
+          scales: {
+            y: { position: "left", ticks: { color: "#8a90a2" }, grid: { color: "#232733" } },
+            y1: { position: "right", ticks: { color: "#8a90a2" }, grid: { display: false } },
+            x: { ticks: { color: "#8a90a2", maxRotation: 0, autoSkip: true }, grid: { display: false } },
+          },
+          plugins: { legend: { labels: { color: "#e6e8ee" } } },
+        },
+      });
+    }
+
+    function renderTierChart(byTier) {
+      const ctx = document.getElementById("tier-chart");
+      const tiers = Object.keys(byTier);
+      const counts = tiers.map((t) => byTier[t].requests);
+      const colors = { cheap: "#4ade80", mid: "#fbbf24", strong: "#f87171", local: "#6ea8fe" };
+
+      if (tierChart) tierChart.destroy();
+      tierChart = new Chart(ctx, {
+        type: "doughnut",
+        data: {
+          labels: tiers,
+          datasets: [{ data: counts, backgroundColor: tiers.map((t) => colors[t] || "#8a90a2") }],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: "bottom", labels: { color: "#e6e8ee" } } },
+        },
+      });
+    }
+
+    function renderRecentTable(events) {
+      const tbody = document.getElementById("recent-tbody");
+      const empty = document.getElementById("recent-empty");
+      tbody.innerHTML = "";
+
+      if (!events.length) {
+        empty.style.display = "block";
+        return;
+      }
+      empty.style.display = "none";
+
+      for (const ev of events) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${fmtTime(ev.ts)}</td>
+          <td><span class="${tierBadgeClass(ev.tier)}">${ev.tier}</span></td>
+          <td>${ev.provider} / ${ev.model}</td>
+          <td>${ev.cache_hit ? '<span class="badge cache">hit</span>' : "&ndash;"}</td>
+          <td>${fmtUsd(ev.estimated_cost_usd)}</td>
+          <td>${Math.round(ev.latency_ms)} ms</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    document.getElementById("window-select").addEventListener("change", loadDashboard);
+    document.getElementById("refresh-btn").addEventListener("click", loadDashboard);
+
+    loadDashboard();
+    setInterval(loadDashboard, 30000); // auto-refresh every 30s
+  </script>
+</body>
+</html>
